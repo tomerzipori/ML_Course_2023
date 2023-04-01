@@ -1,0 +1,132 @@
+---
+title: "Exercise 1 - 316416213"
+author: "Tomer Zipori"
+format: html
+editor: visual
+---
+
+### My task:
+
+```{r}
+#| output: false
+library("tidyverse")
+library("caret")
+library("ISLR")
+set.seed(14)
+```
+
+### Splitting the data to train and test (use p=0.7)
+
+```{r}
+trainIndices <- createDataPartition(Wage$wage, p = 0.7, list = F)
+train_data <- Wage[trainIndices,]
+test_data <- Wage[-trainIndices,]
+```
+
+### Predicting wage out 3 of the other variables with a knn model with (k=5).
+
+```{r}
+tunegrid <- expand.grid(k = 5)
+
+knn_5 <- train(wage ~ age + race + education,
+               data = train_data,
+               method = "knn",
+               tuneGrid = tunegrid,
+               trControl = trainControl(method = "none"),
+               preProcess = c("center", "scale"))
+
+predicted_wage <- predict(knn_5, newdata = test_data)
+```
+
+### Assessing performance using the metrics you've learned
+
+```{r}
+c(Rsq = cor(test_data$wage, predicted_wage)^2,
+  MSE = mean((test_data$wage - predicted_wage)^2),
+  RMSE = sqrt(mean((test_data$wage - predicted_wage)^2)),
+  MAE = mean(abs(test_data$wage - predicted_wage))
+  )
+```
+
+Plotting the fit between truth and prediction
+
+```{r}
+test_data |>
+  mutate(pred = predicted_wage) |> # adding the predictions to the table
+  ggplot(aes(x = wage, y = predicted_wage)) + geom_point() + theme_bw() # plotting
+```
+
+Not nice...
+
+### Trying with a different k, maybe 5 is too small for this big dataset
+
+```{r}
+tunegrid <- expand.grid(k = 50)
+
+knn_50 <- train(wage ~ age + race + education,
+                data = train_data,
+                method = "knn",
+                tuneGrid = tunegrid,
+                trControl = trainControl(method = "none"),
+                preProcess = c("center", "scale"))
+
+predicted_wage <- predict(knn_50, newdata = test_data)
+
+```
+
+Assessing performance:
+
+```{r}
+c(Rsq = cor(test_data$wage, predicted_wage)^2,
+  MSE = mean((test_data$wage - predicted_wage)^2),
+  RMSE = sqrt(mean((test_data$wage - predicted_wage)^2)),
+  MAE = mean(abs(test_data$wage - predicted_wage))
+  )
+```
+
+Plotting the fit between truth and prediction
+
+```{r}
+test_data |>
+  mutate(pred = predicted_wage) |>
+  ggplot(aes(x = wage, y = predicted_wage)) + geom_point() + theme_bw()
+```
+
+Still not nice...
+
+# (5)
+
+Trying with a smaller k:
+
+```{r}
+tunegrid <- expand.grid(k = 2)
+
+knn_2 <- train(wage ~ age + race + education,
+               data = train_data,
+               method = "knn",
+               tuneGrid = tunegrid,
+               trControl = trainControl(method = "none"),
+               preProcess = c("center", "scale"))
+
+predicted_wage <- predict(knn_2, newdata = test_data)
+```
+
+Assessing performance:
+
+```{r}
+c(Rsq = cor(test_data$wage, predicted_wage)^2,
+  MSE = mean((test_data$wage - predicted_wage)^2),
+  RMSE = sqrt(mean((test_data$wage - predicted_wage)^2)),
+  MAE = mean(abs(test_data$wage - predicted_wage))
+  )
+```
+
+Plotting:
+
+```{r}
+test_data |>
+  mutate(pred = predicted_wage) |>
+  ggplot(aes(x = wage, y = predicted_wage)) + geom_point() + theme_bw()
+```
+
+#### We didn't gain much, this is probabiliy due to the large size of the dataset. the model probability over-fits the training data.
