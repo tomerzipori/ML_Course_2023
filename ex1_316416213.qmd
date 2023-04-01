@@ -12,7 +12,7 @@ editor: visual
 library("tidyverse")
 library("caret")
 library("ISLR")
-set.seed(49)
+set.seed(14)
 ```
 
 ### Splitting the data to train and test (use p=0.7)
