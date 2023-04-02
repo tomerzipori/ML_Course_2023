@@ -56,7 +56,7 @@ test_data |>
   ggplot(aes(x = wage, y = predicted_wage)) + geom_point() + theme_bw() # plotting
 ```
 
-Not nice...
+Not nice!
 
 ### Trying with a different k, maybe 5 is too small for this big dataset
 
