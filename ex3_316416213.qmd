@@ -1,0 +1,220 @@
+---
+title: "Ex3 - ML"
+author: "Tomer Zipori"
+format: html
+editor: visual
+---
+
+# Ridge, LASSO and Elastic-Net regressions
+Comparing three feature-selection methods on the 'College' dataset from the ISLR package. 'College' contains 777 observations of US colleges with a large number of variables. In this notebook the variable Graduation rate (Grad.Rate) will be predicted from the rest of the data.
+
+# Loading data and some Pre-processing
+### Libraries
+```{r}
+#| output: false
+#| warning: false
+library(tidyverse)
+library(caret)
+library(ISLR)
+library(leaps)
+```
+
+### 'College' dataset
+```{r}
+head(College)
+
+# re-coding binary feature
+college <- ISLR::College %>%
+  mutate(Private = case_match(Private, "Yes" ~ 1, "No" ~ 0))
+```
+
+
+### Splitting to train and test. use 0.7 for the train data
+```{r}
+set.seed(14)
+train_id <- createDataPartition(y = College$Grad.Rate, p = 0.7, list = F)
+
+train <- College[train_id,]
+test <- College[-train_id,]
+```
+
+## 1. Best-subset
+```{r}
+reg_full <- regsubsets(Grad.Rate ~ ., data = train, nvmax = 17)
+
+reg_summary <- summary(reg_full)
+reg_summary$adjr2
+
+which.max(reg_summary$adjr2)
+
+```
+
+### Visualizing best number of features based on adjusted R2
+```{r}
+df_for_plot <- data.frame("features" = c(1:17), "adjr2" = reg_summary$adjr2) %>%
+  mutate(is_max = adjr2 == max(adjr2))
+
+ggplot(df_for_plot, aes(x = features, y = adjr2, color = is_max)) +
+  geom_line(color = "black") +
+  geom_point() +
+  scale_color_manual(values = c("black", "red")) +
+  theme(legend.position = "none") +
+  theme_classic()
+```
+
+### What are the 14 features selected?
+```{r}
+plot(reg_full, scale = "adjr2")
+```
+The 3 features not selected for the model are "Top10perc", "Books" and "Terminal".
+
+## 2. Ridge regression
+Defining a tuning grid for hyper parameters: lambda and alpha.
+In ridge regression, alpha is considered constant and equal to zero.
+```{r}
+#| warning: false
+tg <- expand.grid(alpha = 0, lambda = c(2 ^ seq(10, -10, length = 100)))
+```
+
+### Training the model
+```{r}
+ridge_reg <- train(Grad.Rate ~ ., 
+                    data = train,
+                    method = "glmnet",
+                    preProcess = c("center", "scale"),
+                    tuneGrid = tg,
+                    trControl =  trainControl(method = "cv", number = 10)# 10-fold CV
+)
+
+ridge_reg
+```
+
+### Best model
+Extracting the best fit and it's hyper parameters
+```{r}
+ridge_reg$bestTune # row number 57 in the tuning grid
+(bestlambda <- ridge_reg$bestTune$lambda)
+```
+
+### Performance of the best tune
+```{r}
+ridge_reg$results[57,]
+```
+### Plotting performance of different values for lambda
+```{r}
+plot(ridge_reg, xTrans = log)
+```
+### How different the parameters of the ridge regression model from the OLS model?
+```{r}
+ridge_coeffs <- coef(ridge_reg$finalModel, s = bestlambda)   
+ols_coeffs <- coef(ridge_reg$finalModel, s = 0)
+
+data.frame("Ridge" = ridge_coeffs[,"s1"], "OLS" = ols_coeffs[,"s1"])
+```
+
+### Plotting the ridge regression coefficients
+```{r}
+plot(ridge_coeffs)
+```
+
+### Assesing ridge regression performance on test set
+```{r}
+ridge_pred <- predict(ridge_reg, newdata = test)
+RMSE(ridge_pred, test$Grad.Rate)
+R2(ridge_pred, test$Grad.Rate)
+```
+## 3. Lasso
+In order to perform Lasso regression the alpha hyper parameter will be set to 1.
+
+### Tuning grid
+```{r}
+#| warning: false
+tg <- expand.grid(alpha = 1, lambda = c(2 ^ seq(10, -10, length = 100)))
+```
+
+### Training the model
+```{r}
+#| warning: false
+lasso_reg <- train(Grad.Rate ~ ., 
+                    data = train,
+                    method = "glmnet",
+                    preProcess = c("center", "scale"),
+                    tuneGrid = tg,
+                    trControl =  trainControl(method = "cv", number = 10)
+)
+
+lasso_reg
+```
+
+### Best model
+Extracting the best fit and it's hyper parameters
+```{r}
+lasso_reg$bestTune # row number 45 in the tuning grid
+(bestlambda <- lasso_reg$bestTune$lambda)
+```
+
+### Performance of the best tune
+```{r}
+lasso_reg$results[45,]
+```
+### Plotting performance of different values for lambda
+```{r}
+plot(lasso_reg, xTrans = log)
+```
+
+### Plotting the LASSO regression coefficients
+```{r}
+lasso_coeffs <- coef(lasso_reg$finalModel, s = bestlambda)
+plot(lasso_coeffs)
+```
+
+### Assesing LASSO regression performance on test set
+```{r}
+lasso_pred <- predict(lasso_reg, newdata = test)
+RMSE(lasso_pred, test$Grad.Rate)
+R2(lasso_pred, test$Grad.Rate)
+```
+
+## 4. Elastic net
+### Tuning grid
+```{r}
+tg <- expand.grid(alpha = c(seq(0, 1, length.out=25)),
+                  lambda = c(2 ^ seq(10, -10, length = 100)))
+```
+
+### Training
+```{r}
+elastic_reg <- train(Grad.Rate ~ ., 
+                    data = train,
+                    method = "glmnet",
+                    preProcess = c("center", "scale"),
+                    tuneGrid = tg,
+                    trControl =  trainControl(method = "cv", number = 10))
+elastic_reg
+```
+
+### Best hyper parameters
+```{r}
+elastic_reg$bestTune
+```
+### Plotting
+```{r}
+plot(elastic_reg, xTrans = log)
+```
+Elastic net regression shows that for the current model, a pure ridge regression is optimal (!
+
+
+### Assesing performance on test set
+```{r}
+elastic_pred <- predict(elastic_reg, newdata = test)
+RMSE(elastic_pred, test$Grad.Rate)
+R2(elastic_pred, test$Grad.Rate)
+```
+
+# Comparison between the three methods
+```{r}
+data.frame("Ridge" = R2(ridge_pred, test$Grad.Rate),
+           "LASSO" = R2(lasso_pred, test$Grad.Rate),
+           "Elastic net" = R2(elastic_pred, test$Grad.Rate))
+```
+
