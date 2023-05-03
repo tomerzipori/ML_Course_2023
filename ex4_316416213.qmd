@@ -1,0 +1,390 @@
+---
+title: "ML course - Excercise 4"
+author: "Tomer Zipori"
+format: html
+editor: visual
+---
+
+
+# Setup
+```{r}
+#| warning: false
+#| output: false
+#| message: false
+library(tidyverse)
+library(ISLR)
+library(caret)
+library(glue)
+```
+
+
+# Loading Data
+```{r}
+glimpse(Hitters)
+
+hitters <- drop_na(Hitters) # remove rows with missing values
+
+# train-test split
+set.seed(14)
+train_index <- createDataPartition(hitters$Salary, p = 0.5, list = F)
+train <- hitters[train_index,]
+test <- hitters[-train_index,]
+```
+
+
+# Predicting *Salary* from other variables
+
+
+# A single tree
+## setting up hyper-parameters and training control
+```{r}
+tc <- trainControl(method = "cv", number = 10)
+tg <- expand.grid(cp = seq(0, 0.25, length = 100))
+```
+
+
+## Fitting a single tree
+```{r}
+single_tree <- train(Salary ~ .,
+                     data = train,
+                     method = "rpart",
+                     tuneGrid = tg,
+                     trControl = tc)
+```
+
+
+## Best tune and CV error
+```{r}
+single_tree$bestTune$cp
+```
+
+
+The best complexity hyper-parameter (pruning parameter) is `r single_tree$bestTune$cp`.
+
+
+```{r}
+single_tree$results[1,]
+```
+```{r}
+#| echo: false
+rmse_cv <- glue("$RMSE={single_tree$results$RMSE[1]}$")
+r2_cv <- glue("$R^2={single_tree$results$Rsquared[1]}$")
+```
+
+
+**Cross validation error**:  
+`r rmse_cv`  
+`r r2_cv`
+
+
+## Plotting the tree
+```{r}
+plot(single_tree$finalModel)
+text(single_tree$finalModel, pretty = 0, cex = 0.6)
+```
+
+
+## Test error and effect size
+```{r}
+single_tree_pred <- predict(single_tree, test)
+
+RMSE(single_tree_pred, test$Salary)
+R2(single_tree_pred, test$Salary)
+```
+```{r}
+#| echo: false
+rmse_test <- glue("$RMSE={RMSE(single_tree_pred, test$Salary)}$")
+r2_test <- glue("$R_2={R2(single_tree_pred, test$Salary)}$")
+```
+
+
+**Test error and effect size**  
+`r rmse_test`  
+`r r2_test`
+
+
+# Random Forest
+## Cross valudating the number of available variables in each split
+```{r}
+tg <- expand.grid(mtry = seq(1, 19, 1))
+```
+
+
+## Fitting a random forest
+```{r}
+rf_fit <- train(Salary ~ .,
+                data = train,
+                method = "rf",
+                tuneGrid = tg,
+                trControl = tc)
+
+rf_fit$finalModel
+rf_fit$bestTune$mtry
+rf_fit$results$RMSE[rf_fit$bestTune$mtry]
+```
+```{r}
+#| echo: false
+besttune_rf <- glue("Number of variable available in each split: {rf_fit$bestTune$mtry}")
+rf_cv_error <- glue("CV error is: $RMSE={rf_fit$results$RMSE[rf_fit$bestTune$mtry]}$")
+```
+
+
+`r besttune_rf`  
+`r rf_cv_error`
+
+
+## Test error and effect size
+```{r}
+rf_pred <- predict(rf_fit, test)
+
+RMSE(rf_pred, test$Salary)
+R2(rf_pred, test$Salary)
+```
+```{r}
+#| echo: false
+rmse_test <- glue("$RMSE={RMSE(rf_pred, test$Salary)}$")
+r2_test <- glue("$R_2={R2(rf_pred, test$Salary)}$")
+```
+
+
+**Test error and effect size**  
+`r rmse_test`  
+`r r2_test`
+
+
+## Variable importance
+```{r}
+randomForest::varImpPlot(rf_fit$finalModel, main = "Variable Importance")
+```
+The most important variable is `CRuns`.
+
+
+# Boosting
+## Hyper-parameters grid
+```{r}
+tg <- expand.grid(interaction.depth = c(1:5), # limits the depth of each tree (d) to 4 splits
+                  n.trees = 5000,
+                  shrinkage = seq(0, 0.2, length = 50), # learning rate
+                  n.minobsinnode = 5)
+```
+
+
+## Fitting the model
+```{r}
+#| eval: false
+set.seed(140)
+fit_boost <- train(Salary ~ ., 
+                   data = train,
+                   method = "gbm",
+                   tuneGrid = tg,
+                   trControl = tc,
+                   verbose = FALSE)
+```
+```{r}
+#| echo: false
+fit_boost <- read_rds("xgboost_model.rds")
+```
+
+
+## Best tuned hyper-parameters
+```{r}
+fit_boost$bestTune
+```
+
+
+## CV error
+```{r}
+fit_boost$results[fit_boost$results$RMSE == min(fit_boost$results$RMSE, na.rm = T),]
+```
+
+
+## Test error and effect size
+```{r}
+boost_pred <- predict(fit_boost, test)
+
+RMSE(boost_pred, test$Salary)
+R2(boost_pred, test$Salary)
+```
+
+
+```{r}
+#| echo: false
+rmse_test <- glue("$RMSE={RMSE(boost_pred, test$Salary)}$")
+r2_test <- glue("$R_2={R2(boost_pred, test$Salary)}$")
+```
+
+
+**Test error and effect size**  
+`r rmse_test`  
+`r r2_test`
+
+
+## Defining new response variable: making Salary binary
+```{r}
+hitters <- hitters %>%
+  mutate(Salary_dic = factor(case_when(Salary < 550 ~ "low",
+                                        Salary >= 550 ~ "high"))) %>%
+  dplyr::select(-Salary)
+
+table(hitters$Salary_dic)/nrow(hitters)
+
+# train-test split
+set.seed(14)
+train_index <- createDataPartition(hitters$Salary, p = 0.5, list = F)
+train <- hitters[train_index,]
+test <- hitters[-train_index,]
+```
+
+Somewhat high base rate...
+
+
+# Predicting *Salary_dic* from other variables
+
+
+# A single tree
+## setting up hyper-parameters and training control
+```{r}
+tc <- trainControl(method = "cv", number = 10)
+tg <- expand.grid(cp = seq(0, 0.25, length = 100))
+```
+
+
+## Fitting a single tree
+```{r}
+single_tree <- train(Salary_dic ~ .,
+                     data = train,
+                     method = "rpart",
+                     tuneGrid = tg,
+                     trControl = tc)
+```
+
+
+## Best tune and CV error
+```{r}
+single_tree$bestTune$cp
+```
+
+
+The best complexity hyper-parameter (pruning parameter) is `r single_tree$bestTune$cp`.
+
+
+```{r}
+single_tree$results[17,]
+```
+```{r}
+#| echo: false
+acc_cv <- glue("$RMSE={single_tree$results$RMSE[1]}$")
+```
+
+
+**Cross validation accuarcy**:  
+`r acc_cv`
+
+
+## Plotting the tree
+```{r}
+plot(single_tree$finalModel)
+text(single_tree$finalModel, pretty = 0, cex = 0.6)
+```
+
+
+## Test error and effect size
+```{r}
+single_tree_pred <- predict(single_tree, test)
+
+confusionMatrix(single_tree_pred, test$Salary_dic)
+```
+
+
+# Random Forest
+## Cross validating the number of available variables in each split
+```{r}
+tg <- expand.grid(mtry = seq(1, 19, 1))
+```
+
+
+## Fitting a random forest
+```{r}
+rf_fit <- train(Salary_dic ~ .,
+                data = train,
+                method = "rf",
+                tuneGrid = tg,
+                trControl = tc)
+
+rf_fit$finalModel
+rf_fit$bestTune$mtry
+rf_fit$results$Accuracy[rf_fit$bestTune$mtry]
+```
+```{r}
+#| echo: false
+besttune_rf <- glue("Number of variable available in each split: {rf_fit$bestTune$mtry}")
+rf_cv_acc <- glue("CV accuracy is: {rf_fit$results$Accuracy[rf_fit$bestTune$mtry]}")
+```
+
+
+`r besttune_rf`  
+`r rf_cv_error`
+
+
+## Test error and effect size
+```{r}
+rf_pred <- predict(rf_fit, test)
+
+confusionMatrix(rf_pred, test$Salary_dic)
+```
+
+
+## Variable importance
+```{r}
+randomForest::varImpPlot(rf_fit$finalModel, main = "Variable Importance")
+```
+
+The most important variable is still `CRuns`.
+
+
+# Boosting
+## Hyper-parameters grid
+```{r}
+tg <- expand.grid(interaction.depth = c(1:5), # limits the depth of each tree (d) to 4 splits
+                  n.trees = 5000,
+                  shrinkage = seq(0, 0.2, length = 50), # learning rate
+                  n.minobsinnode = 5)
+```
+
+
+## Fitting the model
+```{r}
+#| eval: false
+set.seed(140)
+fit_boost_class <- train(Salary_dic ~ ., 
+                   data = train,
+                   method = "gbm",
+                   tuneGrid = tg,
+                   trControl = tc,
+                   verbose = FALSE)
+```
+```{r}
+#| echo: false
+fit_boost_class <- read_rds("xgboost_model2.rds")
+```
+
+
+## Best tuned hyper-parameters
+```{r}
+fit_boost_class$bestTune
+```
+
+
+## CV error
+```{r}
+fit_boost_class$results[fit_boost_class$results$Accuracy == max(fit_boost_class$results$Accuracy, na.rm = T),][1,]
+```
+
+
+## Test error and effect size
+```{r}
+boost_pred <- predict(fit_boost_class, test)
+
+confusionMatrix(boost_pred, test$Salary_dic)
+```
+
