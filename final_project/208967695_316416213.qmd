@@ -1,0 +1,227 @@
+---
+title: "Machine Learning Project"
+description: "Data analysis"
+author: "Tomer & Hadas"
+date: last-modified
+title-block-banner: "#8AE2C6"
+execute: 
+  warning: false
+  message: false
+  cache: true
+  code-fold: true
+format:
+  html:
+    embed-resources: true
+    toc: true
+    toc-depth: 3
+editor: visual
+---
+
+### Upload packeges
+
+```{r}
+library(pROC)
+library(mlbench)
+library(caret)
+library(plotmo)
+library(caret)
+library(knitr)
+library(tidyverse)
+library(reticulate)
+library(randomForest)
+library(shiny)
+library(ggplot2)
+library(caret)
+library(shinydashboard)
+library(lime)
+library(iml)
+```
+
+### Loading the data, define the class as factors
+
+```{r}
+data <-read.csv("finalTablemostUpdated28.05.csv")
+data$is_weaned <- as.factor(data$is_weaned)
+```
+
+### split the data to train & test
+
+```{r}
+set.seed(1) 
+indxTrain <- createDataPartition(y = data$is_weaned,p = 0.8, list = FALSE)
+train_data <- data[indxTrain,]
+test_data <- data[-indxTrain,] 
+```
+
+### Elastic Net
+
+pick the best predictors using shrinking method by elastic net with CV (K-FOLD) to find the best values for our prediction
+
+```{r}
+#| eval: false
+tg<- expand.grid(alpha = c(seq(0, 1, length.out=25)), 
+                 lambda = c(2 ^ seq(10, -10, length = 100)))
+
+
+elastic_fit <- train(is_weaned ~ .,
+                     data = train_data,
+                     method = "glmnet",
+                     preProcess = c("center", "scale"),
+                     tuneGrid = tg,
+                     trControl = trainControl(method = "cv", number = 10))
+```
+
+```{r}
+#| echo: false
+elastic_fit <- read_rds("elastic_fit.rds")
+```
+
+```{r}
+# the best tuning parameter:
+bestuned <- elastic_fit$bestTune #alpha = 0.5833333, lambda =  0.002993734
+
+
+# predict using best parameters.
+elastic_pred<-predict(elastic_fit,newdata=test_data) 
+confusionMatrix(elastic_pred,test_data$is_weaned )
+
+
+importance <- varImp(elastic_fit, scale=FALSE)
+net_importance <- importance$importance
+```
+
+```{r}
+vec_zero_coef1 <- c(row.names(net_importance)[net_importance == 0])
+
+vec_zero_coef1[11] <- "liver_des"
+train_data <- train_data |> select(-vec_zero_coef1)
+
+ggplot(data = net_importance, mapping = aes(x= row.names(net_importance), y = Overall))+geom_point()+ coord_flip()
+```
+
+after we shrieked our model to only 42 features its time to built our models!
+
+### KNN model
+
+find clustering of the class to predict the test classes, using 10-fold cv to find the best K
+
+```{r}
+#| eval: false
+set.seed(1)
+tc <- trainControl(method = "cv",number = 10)
+tg <- expand.grid(k = c(1:10))
+
+set.seed(1) 
+knn_cv <- train(is_weaned ~ ., 
+                        data = train_data, 
+                        method = "knn",  
+                        tuneGrid = tg, 
+                        trControl = tc,
+                        preProcess = c("center", "scale"))
+```
+
+```{r}
+#| echo: false
+#write_rds(knn_cv,"knn_cv.rds")
+knn_cv <- read_rds("knn_cv.rds")
+```
+
+```{r}
+set.seed(1) 
+knn_cv$bestTune # best parmeter is 3
+knn_cv$results  # cross Validation error: 1-0.9336714=  0.066
+```
+
+#### cross validation preformance
+
+```{r}
+ggplot(knn_cv$results, aes(x = k, y= Accuracy), title("cross validation Accuracy")) + geom_point()
+```
+
+calculate the prediction and the probability of each prediction. and asses the measurements. using feature importance to asses the best features
+
+```{r}
+KNNpred_cv <- predict(knn_cv, newdata = test_data)
+KNNpred_cv_prob <- predict(knn_cv, newdata = test_data, type = "prob")
+KNNpred_cv_prob <- KNNpred_cv_prob[,2]
+
+confusionMatrix(KNNpred_cv, test_data$is_weaned)
+
+importanceKNN <- varImp(knn_cv, scale=FALSE)
+plot(importanceKNN)
+```
+
+### random forest
+
+using cross validation to find the best amount of variables considered at each split of the tree (mtry).
+
+```{r}
+#| eval: false
+tc <- trainControl(method = "cv",number = 10)
+tg <- expand.grid(mtry = c(seq(15,25,1)))
+
+set.seed(1)
+
+random_forest_cv <- train(is_weaned ~ ., 
+                data = train_data,
+                method = "rf",
+                tuneGrid = tg,
+                trControl = tc)
+```
+
+```{r}
+#| echo: false
+#write_rds(random_forest_cv, "random_forest_cv.rds")
+random_forest_cv <- read_rds("random_forest_cv.rds")
+random_forest_cv$bestTune #17
+```
+
+#### cross validation preformance
+
+```{r}
+ggplot(random_forest_cv$results, aes(x = mtry, y= Accuracy), title("cross validation Accuracy")) + geom_point()
+```
+
+predict the classes for the test data to asses the model performance.
+
+```{r}
+rfpred_cv17 <- predict(random_forest_cv, newdata = test_data)
+rfpred_cv17_probs <- predict(random_forest_cv, newdata = test_data, type = "prob")
+rfpred_cv17_probs <- rfpred_cv17_probs[,2]
+
+confusionMatrix(rfpred_cv17, test_data$is_weaned)
+importancerf <- varImp(random_forest_cv, scale=FALSE)
+plot(importancerf)
+```
+
+better performance
+
+### logistic regression
+
+last model logistic regression
+
+```{r}
+logreg_model <- glm(is_weaned ~ ., family = binomial, data = train_data)
+probabilities <- logreg_model %>% predict(test_data, type = "response")
+logreg_prediction <- ifelse(probabilities > 0.5, 1, 0)
+logreg_prediction <- as.factor(logreg_prediction)
+
+confusionMatrix(logreg_prediction, test_data$is_weaned)
+coef_reg <- summary(logreg_model)$coef
+coef_reg <- as.data.frame(coef_reg)
+ggplot(data = coef_reg, mapping = aes(x= row.names(coef_reg), y = Estimate))+geom_point()+ coord_flip()
+```
+
+### compared measurments
+
+```{r}
+roc_KNN <- roc(response = test_data$is_weaned, predictor = as.numeric(KNNpred_cv_prob))
+roc_rf <- roc(response =test_data$is_weaned, predictor = as.numeric(rfpred_cv17_probs))
+roc_lr <- roc(test_data$is_weaned, as.numeric(probabilities))
+
+plot(roc_rf, col = "blue", print.auc = TRUE, main = "ROC Curves Comparison", xlim= c(1, -0))
+plot(roc_KNN, col = "green", main = "ROC Curves Comparison", add = TRUE)
+plot(roc_lr, col = "red", main = "ROC Curves Comparison", add = TRUE)
+legend("bottomright", legend = c("Random Forest", "KNN", "Logistic Regression"),
+       col = c("blue", "green", "red"), lty = 1)
+```
